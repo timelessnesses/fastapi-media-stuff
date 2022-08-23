@@ -8,7 +8,7 @@ import pydub
 from PIL import Image
 
 application = fastapi.FastAPI()
-app = application  # gunicorn
+app = application  # uvicorn
 
 
 linear_enum = {
@@ -65,6 +65,6 @@ async def root():
         """
 
 @app.put("/")
-
+async def 
 if __name__ == "__main__":
     app.run("localhost", 5000)
