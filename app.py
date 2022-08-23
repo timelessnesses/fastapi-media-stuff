@@ -64,6 +64,7 @@ async def root():
         <p>usage:<br>provide param width/height/resampling (default lanczos) (optional) (look at resampling header for every value possible) and ext(default png) (optional) <br>you need to upload the image to request body or feed it as a file form under tag name image<h2>resampling</h2>resampling if you want different resizing results<br>- nearest: use nearest neighbors<br>- bilinear: linear interpolation<br>- bicubic: cubic spline interpolation<br>- lanczos: a high-quality downsampling filter (default)<br><a href="/docs">click me to go to more of detailed api info</a>
         """
 
+@app.put("/")
 
 if __name__ == "__main__":
     app.run("localhost", 5000)
