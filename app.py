@@ -1,14 +1,16 @@
-from calendar import c
 from dotenv import load_dotenv
 
 load_dotenv()
 import enum
 import io
+import math
 import os
 import random
 import string
 import typing
+from io import BytesIO
 
+import aiohttp
 import aioredis
 import fastapi
 import magic
@@ -16,30 +18,24 @@ import pydub
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from sanitize_filename import sanitize
 
-application = fastapi.FastAPI()
+application = fastapi.FastAPI(docs_url="/", redoc_url="/redoc",debug=True,title="Media API",description="API for media stuff like convertion and resizing etc.",version="1.0.0",)
 app = application  # uvicorn
 
-import math
-import os
-import typing
-from io import BytesIO
-
-import aiohttp
-import discord
-from PIL import Image, ImageDraw, ImageFont
 
 class Enum_Status(enum.Enum):
     """
     Discord user status
     """
+
     online = "online"
     offline = "offline"
     idle = "idle"
     streaming = "streaming"
     do_not_disturb = "dnd"
+
 
 class Generator:
     def __init__(self):
@@ -97,9 +93,9 @@ class Generator:
             async with session.get(profile_image) as r:
                 profile = Image.open(BytesIO(await r.read())).convert("RGBA")
         profile = profile.resize((180, 180))
-        
+
         user_status = user_status.value.lower()
-        
+
         if user_status == "online":
             status = Image.open(self.online)
         if user_status == "offline":
@@ -205,6 +201,8 @@ linear_enum = {
 
 
 class linear_enum_typing(enum.Enum):
+    """Linear enums for image resizing"""
+
     nearest = "nearest"
     lanczos = "lanczos"
     bilinear = "bilinear"
@@ -215,6 +213,7 @@ class linear_enum_typing(enum.Enum):
 @cache(expire=60)
 async def resize(
     request: fastapi.Request,
+    response: fastapi.Response,
     image: fastapi.UploadFile,
     width: int,
     height: int,
@@ -256,30 +255,39 @@ async def root():
 @cache(expire=60)
 async def convert_file(
     request: fastapi.Request,
+    response: fastapi.Response,
     file: fastapi.UploadFile,
     ext: typing.Optional[str] = "mp4",
 ):
     """
     convert file to whatever you want
     """
-    file = await file.read()
+    file_content = await file.read()
     file_name = sanitize(file.filename)
     with open(file_name, "wb") as f:
-        f.write(file)
+        f.write(file_content)
     os.system(
-        f"ffmpeg -i {file_name} -c:v libx264 -c:a aac -strict -2 {file_name}.{ext}"
+        f"ffmpeg -i {file_name} {file_name}.{ext}"
     )
-    with open(f"{file_name}.{ext}", "rb") as f:
-        content = io.BytesIO(f.read())
-    os.remove(f"{file_name}.{ext}")
+    try:
+        with open(f"{file_name}.{ext}", "rb") as f:
+            content = io.BytesIO(f.read())
+        os.remove(f"{file_name}.{ext}")
+        os.remove(file_name)
+    except FileNotFoundError:
+        return {
+            "error": "ffmpeg error",
+        }
     return fastapi.responses.StreamingResponse(
         content=content, media_type=magic.from_buffer(content.read(1024), mime=True)
     )
+
 
 @app.put("/merge_audio")
 @cache(expire=60)
 async def merge_audio(
     request: fastapi.Request,
+    response: fastapi.Response,
     files: typing.List[fastapi.UploadFile],
 ):
     merged = pydub.AudioSegment.empty()
@@ -292,9 +300,11 @@ async def merge_audio(
         content=content, media_type=magic.from_buffer(content.read(1024), mime=True)
     )
 
+
 @app.put("/slice_audio")
 async def slice_audio(
     request: fastapi.Request,
+    response: fastapi.Response,
     file: fastapi.UploadFile,
     start: int,
     end: int,
@@ -307,16 +317,18 @@ async def slice_audio(
     return fastapi.responses.StreamingResponse(
         content=content, media_type=magic.from_buffer(content.read(1024), mime=True)
     )
-    
+
+
 @app.get("/level_image_generator")
 async def level_image_generator(
     request: fastapi.Request,
-    bg_image: str=None,
-    profile_image: str=None,
-    level: int=1,
-    user_xp: int=0,
-    next_xp: int=100,
-    server_position: int=1,
+    response: fastapi.Response,
+    bg_image: str = None,
+    profile_image: str = None,
+    level: int = 1,
+    user_xp: int = 0,
+    next_xp: int = 100,
+    server_position: int = 1,
     user_name: str = "Dummy#0000",
     user_status: Enum_Status = Enum_Status.online,
     font_color: str = "255,255,255",
@@ -335,6 +347,7 @@ async def level_image_generator(
         ),
         media_type="image/png",
     )
+
 
 @app.on_event("startup")
 async def startup():
