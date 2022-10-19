@@ -365,16 +365,16 @@ async def test_connection(host: str, port:int, password:typing.Union[str,bytes,N
     ws = await websockets.connect(f'ws{"s" if ssl else ""}://{host}:{port}/',extra_headers={'Authorization':password,'Client-Name':'Python connection tester','User-Id':1})
     message = await ws.recv()
     try:
-        orjson.loads(message)
+        j = orjson.loads(message)
     except orjson.JSONDecodeError:
         await ws.close()
-        return (False, None)
+        return (False, None, None)
     ping = await ws.ping()
     pong = time.time()
     await ping
     pong = time.time() - pong
     await ws.close()
-    return (True,pong)
+    return (True,pong,j)
 
 class TestConnection(pydantic.BaseModel):
     host: str = pydantic.Field(example="lavalink.api.rukchadisa.live")
@@ -387,6 +387,7 @@ class Return_Response(pydantic.BaseModel):
     ping: float = 0
     error: typing.Optional[str] = None
     stuff: TestConnection
+    stats: dict
     
 @app.get("/test",response_model=Return_Response,response_class=fastapi.responses.JSONResponse)
 async def test(stuff:TestConnection = fastapi.Depends()):
@@ -399,33 +400,37 @@ async def test(stuff:TestConnection = fastapi.Depends()):
         JSONResponse
     """
     try:
-        alive, ping = await test_connection(stuff.host, stuff.port, stuff.password, stuff.ssl)
+        alive, ping, stats = await test_connection(stuff.host, stuff.port, stuff.password, stuff.ssl)
     except websockets.exceptions.InvalidStatusCode:
         return {
             "error": "Invalid status code (likely password is incorrect or host is down)",
             "alive": False,
             "ping": 0,
-            "stuff": stuff
+            "stuff": stuff,
+            "stats": {}
         }
     except socket.gaierror:
         return {
             "error": "Invalid host",
             "alive": False,
             "ping": 0,
-            "stuff": stuff
+            "stuff": stuff,
+            "stats": {}
         }
     except OSError:
         return {
             "error": "Invalid port or host is down",
             "alive": False,
             "ping": 0,
-            "stuff": stuff
+            "stuff": stuff,
+            "stats": {}
         }
     return {
         "error": None,
         "alive": alive,
         "ping": ping,
-        "stuff": stuff
+        "stuff": stuff,
+        "stats": stats
     }
 
 @app.websocket("/ws")
