@@ -6,27 +6,35 @@ import io
 import math
 import os
 import random
+import socket
 import string
+import time
 import typing
 from io import BytesIO
-import time
 
 import aiohttp
 import aioredis
 import fastapi
 import magic
+import orjson
+import pydantic
 import pydub
+import websockets
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
 from PIL import Image, ImageDraw, ImageFont
 from sanitize_filename import sanitize
-import websockets
-import orjson
-import pydantic
-import socket
-from fastapi.middleware.cors import CORSMiddleware
-application = fastapi.FastAPI(docs_url="/", redoc_url="/redoc",debug=True,title="Media API",description="API for media stuff like convertion and resizing etc.",version="1.0.0",)
+
+application = fastapi.FastAPI(
+    docs_url="/",
+    redoc_url="/redoc",
+    debug=True,
+    title="Media API",
+    description="API for media stuff like convertion and resizing etc.",
+    version="1.0.0",
+)
 app = application  # uvicorn
 origins = ["*"]
 
@@ -37,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 class Enum_Status(enum.Enum):
     """
@@ -279,9 +288,7 @@ async def convert_file(
     file_name = sanitize(file.filename)
     with open(file_name, "wb") as f:
         f.write(file_content)
-    os.system(
-        f"ffmpeg -i {file_name} {file_name}.{ext}"
-    )
+    os.system(f"ffmpeg -i {file_name} {file_name}.{ext}")
     try:
         with open(f"{file_name}.{ext}", "rb") as f:
             content = io.BytesIO(f.read())
@@ -361,9 +368,25 @@ async def level_image_generator(
         media_type="image/png",
     )
 
-async def test_connection(host: str, port:int, password:typing.Union[str,bytes,None]=None, ssl: bool = False):
-    ws = await websockets.connect(f'ws{"s" if ssl else ""}://{host}:{port}/',extra_headers={'Authorization':password,'Client-Name':'Python connection tester','User-Id':1})
-    message = await ws.recv()
+
+async def test_connection(
+    host: str,
+    port: int=80,
+    password: typing.Union[str, bytes, None] = None,
+    ssl: bool = False,
+):
+    try:
+        ws = await websockets.connect(
+            f'ws{"s" if ssl else ""}://{host}:{port}/',
+            extra_headers={
+                "Authorization": password,
+                "Client-Name": "Python connection tester",
+                "User-Id": 1,
+            },
+        )
+    except:
+        return (False,None,None)
+    message = await ws.recv()  # kinda expected it
     try:
         j = orjson.loads(message)
     except orjson.JSONDecodeError:
@@ -374,13 +397,17 @@ async def test_connection(host: str, port:int, password:typing.Union[str,bytes,N
     await ping
     pong = time.time() - pong
     await ws.close()
-    return (True,pong,j)
+    return (True, pong, j)
+
 
 class TestConnection(pydantic.BaseModel):
     host: str = pydantic.Field(example="lavalink.api.rukchadisa.live")
     port: int = pydantic.Field(example=80)
-    password: typing.Union[str,bytes,None] = pydantic.Field(default=None,example="youshallnotpass")
+    password: typing.Union[str, bytes, None] = pydantic.Field(
+        default=None, example="youshallnotpass"
+    )
     ssl: bool = False
+
 
 class Return_Response(pydantic.BaseModel):
     alive: bool
@@ -388,9 +415,14 @@ class Return_Response(pydantic.BaseModel):
     error: typing.Optional[str] = None
     stuff: TestConnection
     stats: dict
-    
-@app.get("/test",response_model=Return_Response,response_class=fastapi.responses.JSONResponse)
-async def test(stuff:TestConnection = fastapi.Depends()):
+
+
+@app.get(
+    "/test",
+    response_model=Return_Response,
+    response_class=fastapi.responses.JSONResponse,
+)
+async def test(stuff: TestConnection = fastapi.Depends()):
     """Test lavalink connection
 
     Args:
@@ -400,14 +432,17 @@ async def test(stuff:TestConnection = fastapi.Depends()):
         JSONResponse
     """
     try:
-        alive, ping, stats = await test_connection(stuff.host, stuff.port, stuff.password, stuff.ssl)
+        alive, ping, stats = await test_connection(
+            stuff.host, stuff.port, stuff.password, stuff.ssl
+        )
+        print(stats)
     except websockets.exceptions.InvalidStatusCode:
         return {
             "error": "Invalid status code (likely password is incorrect or host is down)",
             "alive": False,
             "ping": 0,
             "stuff": stuff,
-            "stats": {}
+            "stats": {},
         }
     except socket.gaierror:
         return {
@@ -415,7 +450,7 @@ async def test(stuff:TestConnection = fastapi.Depends()):
             "alive": False,
             "ping": 0,
             "stuff": stuff,
-            "stats": {}
+            "stats": {},
         }
     except OSError:
         return {
@@ -423,25 +458,20 @@ async def test(stuff:TestConnection = fastapi.Depends()):
             "alive": False,
             "ping": 0,
             "stuff": stuff,
-            "stats": {}
+            "stats": {},
         }
-    return {
-        "error": None,
-        "alive": alive,
-        "ping": ping,
-        "stuff": stuff,
-        "stats": stats
-    }
+    return {"error": None, "alive": alive, "ping": ping, "stuff": stuff, "stats": stats}
+
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: fastapi.WebSocket):
     """
-    Websocket endpoint to update if lavalink is alive or not instantly!  
-    You should send a json object with the following keys:  
-    type: str (either "test" or "disconnect")  
-    host: str  
-    port: int  
-    password: str (optional)  
+    Websocket endpoint to update if lavalink is alive or not instantly!
+    You should send a json object with the following keys:
+    type: str (either "test" or "disconnect")
+    host: str
+    port: int
+    password: str (optional)
     With return type of Return_Response
     """
     await ws.accept()
@@ -452,46 +482,44 @@ async def ws_endpoint(ws: fastapi.WebSocket):
             continue
         if recv["type"] == "test":
             try:
-                alive, ping = await test_connection(recv["host"], recv["port"], recv["password"])
+                alive, ping = await test_connection(
+                    recv["host"], recv["port"], recv["password"]
+                )
             except websockets.exceptions.InvalidStatusCode:
-                await ws.send_json({
-                    "error": "Invalid status code (likely password is incorrect or host is down)",
-                    "alive": False,
-                    "ping": 0,
-                    "stuff": recv
-                })
+                await ws.send_json(
+                    {
+                        "error": "Invalid status code (likely password is incorrect or host is down)",
+                        "alive": False,
+                        "ping": 0,
+                        "stuff": recv,
+                    }
+                )
             except socket.gaierror:
-                await ws.send_json({
-                    "error": "Invalid host",
-                    "alive": False,
-                    "ping": 0,
-                    "stuff": recv
-                })
+                await ws.send_json(
+                    {"error": "Invalid host", "alive": False, "ping": 0, "stuff": recv}
+                )
             except OSError:
-                await ws.send_json({
-                    "error": "Invalid port or host is down",
-                    "alive": False,
-                    "ping": 0,
-                    "stuff": recv
-                })
+                await ws.send_json(
+                    {
+                        "error": "Invalid port or host is down",
+                        "alive": False,
+                        "ping": 0,
+                        "stuff": recv,
+                    }
+                )
             else:
-                await ws.send_json({
-                    "error": None,
-                    "alive": alive,
-                    "ping": ping,
-                    "stuff": recv
-                })
+                await ws.send_json(
+                    {"error": None, "alive": alive, "ping": ping, "stuff": recv}
+                )
         elif recv["type"] == "disconnect":
             await ws.send_json({"error": "Disconnected.\nSee you next time!"})
             await ws.close(reason="Disconnected by client")
             break
         else:
-            await ws.send_json({
-                "error": "Invalid type",
-                "alive": False,
-                "ping": 0,
-                "stuff": recv
-            })
+            await ws.send_json(
+                {"error": "Invalid type", "alive": False, "ping": 0, "stuff": recv}
+            )
+
 
 @app.on_event("startup")
 async def startup():
