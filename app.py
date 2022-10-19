@@ -384,20 +384,21 @@ async def test_connection(
                 "User-Id": 1,
             },
         )
-    except:
-        return (False,None,None)
+    except Exception as e:
+        print(e)
+        return (False,0,{},"timeout or got binary")
     message = await ws.recv()  # kinda expected it
     try:
         j = orjson.loads(message)
     except orjson.JSONDecodeError:
         await ws.close()
-        return (False, None, None)
+        return (False, 0,{},"not lavalink")
     ping = await ws.ping()
     pong = time.time()
     await ping
     pong = time.time() - pong
     await ws.close()
-    return (True, pong, j)
+    return (True, pong, j,None)
 
 
 class TestConnection(pydantic.BaseModel):
@@ -432,10 +433,9 @@ async def test(stuff: TestConnection = fastapi.Depends()):
         JSONResponse
     """
     try:
-        alive, ping, stats = await test_connection(
+        alive, ping, stats, error = await test_connection(
             stuff.host, stuff.port, stuff.password, stuff.ssl
         )
-        print(stats)
     except websockets.exceptions.InvalidStatusCode:
         return {
             "error": "Invalid status code (likely password is incorrect or host is down)",
@@ -460,7 +460,7 @@ async def test(stuff: TestConnection = fastapi.Depends()):
             "stuff": stuff,
             "stats": {},
         }
-    return {"error": None, "alive": alive, "ping": ping, "stuff": stuff, "stats": stats}
+    return {"error": error, "alive": alive, "ping": ping, "stuff": stuff, "stats": stats}
 
 
 @app.websocket("/ws")
@@ -482,7 +482,7 @@ async def ws_endpoint(ws: fastapi.WebSocket):
             continue
         if recv["type"] == "test":
             try:
-                alive, ping = await test_connection(
+                alive, ping, stats = await test_connection(
                     recv["host"], recv["port"], recv["password"]
                 )
             except websockets.exceptions.InvalidStatusCode:
@@ -509,7 +509,7 @@ async def ws_endpoint(ws: fastapi.WebSocket):
                 )
             else:
                 await ws.send_json(
-                    {"error": None, "alive": alive, "ping": ping, "stuff": recv}
+                    {"error": None, "alive": alive, "ping": ping, "stuff": recv,"stats":stats}
                 )
         elif recv["type"] == "disconnect":
             await ws.send_json({"error": "Disconnected.\nSee you next time!"})
