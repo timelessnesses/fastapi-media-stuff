@@ -9,6 +9,7 @@ import random
 import string
 import typing
 from io import BytesIO
+import time
 
 import aiohttp
 import aioredis
@@ -20,10 +21,22 @@ from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
 from PIL import Image, ImageDraw, ImageFont
 from sanitize_filename import sanitize
-
+import websockets
+import orjson
+import pydantic
+import socket
+from fastapi.middleware.cors import CORSMiddleware
 application = fastapi.FastAPI(docs_url="/", redoc_url="/redoc",debug=True,title="Media API",description="API for media stuff like convertion and resizing etc.",version="1.0.0",)
 app = application  # uvicorn
+origins = ["*"]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Enum_Status(enum.Enum):
     """
@@ -323,8 +336,8 @@ async def slice_audio(
 async def level_image_generator(
     request: fastapi.Request,
     response: fastapi.Response,
+    profile_image: str,
     bg_image: str = None,
-    profile_image: str = None,
     level: int = 1,
     user_xp: int = 0,
     next_xp: int = 100,
@@ -334,7 +347,7 @@ async def level_image_generator(
     font_color: str = "255,255,255",
 ):
     return fastapi.responses.StreamingResponse(
-        generate_profile(
+        await generate_profile(
             bg_image=bg_image,
             profile_image=profile_image,
             level=level,
@@ -343,11 +356,137 @@ async def level_image_generator(
             server_position=server_position,
             user_name=user_name,
             user_status=user_status,
-            font_color=font_color.split(","),
+            font_color=tuple([int(x) for x in font_color.split(",")]),
         ),
         media_type="image/png",
     )
 
+async def test_connection(host: str, port:int, password:typing.Union[str,bytes,None]=None, ssl: bool = False):
+    ws = await websockets.connect(f'ws{"s" if ssl else ""}://{host}:{port}/',extra_headers={'Authorization':password,'Client-Name':'Python connection tester','User-Id':1})
+    message = await ws.recv()
+    try:
+        orjson.loads(message)
+    except orjson.JSONDecodeError:
+        await ws.close()
+        return (False, None)
+    ping = await ws.ping()
+    pong = time.time()
+    await ping
+    pong = time.time() - pong
+    await ws.close()
+    return (True,pong)
+
+class TestConnection(pydantic.BaseModel):
+    host: str = pydantic.Field(example="lavalink.api.rukchadisa.live")
+    port: int = pydantic.Field(example=80)
+    password: typing.Union[str,bytes,None] = pydantic.Field(default=None,example="youshallnotpass")
+    ssl: bool = False
+
+class Return_Response(pydantic.BaseModel):
+    alive: bool
+    ping: float = 0
+    error: typing.Optional[str] = None
+    stuff: TestConnection
+    
+@app.get("/test",response_model=Return_Response,response_class=fastapi.responses.JSONResponse)
+async def test(stuff:TestConnection = fastapi.Depends()):
+    """Test lavalink connection
+
+    Args:
+        stuff (TestConnection, optional): _description_. Defaults to fastapi.Depends().
+
+    Returns:
+        JSONResponse
+    """
+    try:
+        alive, ping = await test_connection(stuff.host, stuff.port, stuff.password, stuff.ssl)
+    except websockets.exceptions.InvalidStatusCode:
+        return {
+            "error": "Invalid status code (likely password is incorrect or host is down)",
+            "alive": False,
+            "ping": 0,
+            "stuff": stuff
+        }
+    except socket.gaierror:
+        return {
+            "error": "Invalid host",
+            "alive": False,
+            "ping": 0,
+            "stuff": stuff
+        }
+    except OSError:
+        return {
+            "error": "Invalid port or host is down",
+            "alive": False,
+            "ping": 0,
+            "stuff": stuff
+        }
+    return {
+        "error": None,
+        "alive": alive,
+        "ping": ping,
+        "stuff": stuff
+    }
+
+@app.websocket("/ws")
+async def ws_endpoint(ws: fastapi.WebSocket):
+    """
+    Websocket endpoint to update if lavalink is alive or not instantly!  
+    You should send a json object with the following keys:  
+    type: str (either "test" or "disconnect")  
+    host: str  
+    port: int  
+    password: str (optional)  
+    With return type of Return_Response
+    """
+    await ws.accept()
+    while True:
+        recv = orjson.loads(await ws.receive_text())
+        if "type" not in recv.keys():
+            await ws.send_json({"error": "Invalid request"})
+            continue
+        if recv["type"] == "test":
+            try:
+                alive, ping = await test_connection(recv["host"], recv["port"], recv["password"])
+            except websockets.exceptions.InvalidStatusCode:
+                await ws.send_json({
+                    "error": "Invalid status code (likely password is incorrect or host is down)",
+                    "alive": False,
+                    "ping": 0,
+                    "stuff": recv
+                })
+            except socket.gaierror:
+                await ws.send_json({
+                    "error": "Invalid host",
+                    "alive": False,
+                    "ping": 0,
+                    "stuff": recv
+                })
+            except OSError:
+                await ws.send_json({
+                    "error": "Invalid port or host is down",
+                    "alive": False,
+                    "ping": 0,
+                    "stuff": recv
+                })
+            else:
+                await ws.send_json({
+                    "error": None,
+                    "alive": alive,
+                    "ping": ping,
+                    "stuff": recv
+                })
+        elif recv["type"] == "disconnect":
+            await ws.send_json({"error": "Disconnected.\nSee you next time!"})
+            await ws.close(reason="Disconnected by client")
+            break
+        else:
+            await ws.send_json({
+                "error": "Invalid type",
+                "alive": False,
+                "ping": 0,
+                "stuff": recv
+            })
 
 @app.on_event("startup")
 async def startup():
