@@ -482,7 +482,7 @@ async def ws_endpoint(ws: fastapi.WebSocket):
             continue
         if recv["type"] == "test":
             try:
-                alive, ping, stats = await test_connection(
+                alive, ping, stats,error = await test_connection(
                     recv["host"], recv["port"], recv["password"]
                 )
             except websockets.exceptions.InvalidStatusCode:
@@ -509,7 +509,7 @@ async def ws_endpoint(ws: fastapi.WebSocket):
                 )
             else:
                 await ws.send_json(
-                    {"error": None, "alive": alive, "ping": ping, "stuff": recv,"stats":stats}
+                    {"error": error, "alive": alive, "ping": ping, "stuff": recv,"stats":stats}
                 )
         elif recv["type"] == "disconnect":
             await ws.send_json({"error": "Disconnected.\nSee you next time!"})
