@@ -462,6 +462,25 @@ async def test(stuff: TestConnection = fastapi.Depends()):
         }
     return {"error": error, "alive": alive, "ping": ping, "stuff": stuff, "stats": stats}
 
+@app.post("/test_bulk")
+async def test_bulk(
+    stuff: typing.List[TestConnection]
+):
+    result = []
+    for x in stuff:
+        alive, ping, stats, error = await test_connection(
+            x.host, x.port, x.password, x.ssl
+        )
+        result.append(
+            {
+                "error": error,
+                "alive": alive,
+                "ping": ping,
+                "stuff": x,
+                "stats": stats,
+            }
+        )
+    return result
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: fastapi.WebSocket):
