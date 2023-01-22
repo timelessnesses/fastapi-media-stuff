@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "fastapi-media-stuff"
+name = "lavalink-checker"
 version = "0.1.0"
 description = ""
 authors = ["timelessnesses <mooping3roblox@gmail.com>"]
@@ -8,18 +8,8 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = "^3.9"
 fastapi = "^0.79.1"
-python-multipart = "^0.0.5"
-pydub = "^0.25.1"
-moviepy = "^1.0.3"
-Pillow = "^9.2.0"
 uvicorn = "^0.18.2"
-sanitize-filename = "^1.2.0"
 websockets = "*"
-python-magic = "^0.4.27"
-redis = "*"
-python-dotenv = "^0.21.0"
-aiohttp = "^3.8.1"
-fastapi-cache2 = {git = "https://github.com/timelessnesses/fastapi-cache"}
 orjson = "^3.8.0"
 
 [tool.poetry.dev-dependencies]
